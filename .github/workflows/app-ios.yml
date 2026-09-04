@@ -34,7 +34,9 @@ concurrency:
 
 env:
   BUILD_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref_name }}
-  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+  # Non-empty only for a real release: a tag push (app-ios-v*) or an explicit
+  # release_tag input. Otherwise '' so the validation/release steps skip.
+  RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/app-ios-v') && github.ref_name || (inputs.release_tag || '') }}
   FLUTTER_VERSION: "3.44.4"
 
 jobs:
@@ -52,6 +54,7 @@ jobs:
       - name: Validate tag ↔ pubspec
         if: env.RELEASE_TAG != ''
         run: |
+          case "$RELEASE_TAG" in app-ios-v*) ;; *) echo "::error::release tag must look like app-ios-v<version>, got: $RELEASE_TAG"; exit 1 ;; esac
           VERSION="${RELEASE_TAG#app-ios-v}"
           PUBSPEC=$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d+ -f1)
           if [ "$VERSION" != "$PUBSPEC" ]; then
