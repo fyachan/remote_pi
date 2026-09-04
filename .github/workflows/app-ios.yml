@@ -1,0 +1,115 @@
+# iOS build of the Remote Pi app (app/) — produces an UNSIGNED IPA.
+#
+# No Apple credentials involved: the build runs with --no-codesign, so the
+# resulting .ipa is just a zipped Runner.app. It is NOT installable on a
+# device — it only proves the iOS target compiles and packages. To ship a
+# signed, installable IPA later, add a distribution certificate + App Store
+# Connect API key (TestFlight) and replace the packaging step with
+# `xcodebuild archive` + `export`.
+#
+# Trigger: tag `app-ios-v<version>` (the version MUST match app/pubspec.yaml)
+# creates a GitHub Release with the .ipa; manual dispatch builds the
+# dispatched ref and uploads the artifact only (no release).
+
+name: app-ios
+
+on:
+  push:
+    tags: ["app-ios-v*"]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch or tag to build (default: main); a GitHub Release is only created for app-ios-v* tags"
+        required: false
+      release_tag:
+        description: "Optional existing release tag (e.g. app-ios-v1.2.0); creates a GitHub Release with the .ipa"
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: app-ios-${{ github.event_name == 'workflow_dispatch' && (inputs.release_tag || inputs.ref || 'manual') || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  BUILD_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref_name }}
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+  FLUTTER_VERSION: "3.44.4"
+
+jobs:
+  ios:
+    name: Unsigned IPA
+    runs-on: macos-15
+    defaults: { run: { working-directory: app } }
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.BUILD_REF }}
+
+      - name: Validate tag ↔ pubspec
+        if: env.RELEASE_TAG != ''
+        run: |
+          VERSION="${RELEASE_TAG#app-ios-v}"
+          PUBSPEC=$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d+ -f1)
+          if [ "$VERSION" != "$PUBSPEC" ]; then
+            echo "::error::tag $RELEASE_TAG asks for $VERSION but the app pubspec is at $PUBSPEC"
+            exit 1
+          fi
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Build iOS (unsigned)
+        run: |
+          flutter pub get
+          flutter build ios --release --no-codesign
+
+      - name: Package IPA
+        run: |
+          VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d+ -f1)
+          APP=build/ios/iphoneos/Runner.app
+          test -d "$APP"
+          # A .ipa is just a zip with the app under Payload/ (per the
+          # installable-package format). No signing is applied here.
+          mkdir -p out/Payload
+          cp -R "$APP" out/Payload/
+          (cd out && zip -qry "RemotePi-${VERSION}-ios-unsigned.ipa" Payload)
+          ls -la out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-ipa
+          path: app/out/*.ipa
+          if-no-files-found: error
+
+      - name: Create GitHub Release
+        if: env.RELEASE_TAG != ''
+        run: |
+          VERSION="${RELEASE_TAG#app-ios-v}"
+          NOTES_FILE=$(mktemp)
+          {
+            echo "Unsigned iOS IPA (built with \`--no-codesign\`). **Not installable"**
+            echo "on a device — this is an artifact-only build. A signed/TestFlight"
+            echo "pipeline is not in place yet."
+          } > "$NOTES_FILE"
+          gh release create "$RELEASE_TAG" out/*.ipa \
+            --title "Remote Pi (app) ${VERSION} — iOS (unsigned)" \
+            --notes-file "$NOTES_FILE" \
+            --latest=false
+
+      - name: Summary
+        run: |
+          {
+            echo "## iOS IPA built (unsigned)"
+            echo ""
+            echo "Artifact: \`ios-ipa\` (RemotePi-<version>-ios-unsigned.ipa)"
+            echo ""
+            echo "Built with \`--no-codesign\` — NOT installable on a device."
+            echo "This job proves the iOS target compiles and packages."
+          } >> "$GITHUB_STEP_SUMMARY"
