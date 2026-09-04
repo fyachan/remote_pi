@@ -1,11 +1,12 @@
-# CI da CLI interna do Cockpit (crate Rust em `cockpit/cli/`).
+# CI of Cockpit's internal CLI (Rust crate in `cockpit/cli/`).
 #
-# Ela é o binário que o app materializa em ~/.cockpit/bin/cockpit e que também
-# atende os hooks do Claude Code (`cockpit hook`). Roda nas TRÊS plataformas de
-# propósito: o transporte tem caminho `#[cfg(unix)]` (socket Unix) e caminho
-# Windows (TCP no loopback + token), e só o compilador de cada uma prova que os
-# dois compilam. Os testes de wire (tests/wire.rs) sobem um servidor falso e
-# conferem a requisição que chega — é o contrato que o app enxerga.
+# It is the binary the app materializes at ~/.cockpit/bin/cockpit and that also
+# serves the Claude Code hooks (`cockpit hook`). It runs on all THREE
+# platforms on purpose: the transport has a `#[cfg(unix)]` path (Unix socket)
+# and a Windows path (TCP over loopback + token), and only each one's
+# compiler proves both compile. The wire tests (tests/wire.rs) spin up a fake
+# server and check the request that arrives — that is the contract the app
+# sees.
 
 name: cockpit-cli
 
@@ -36,8 +37,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Os runners hospedados já trazem rustup/cargo; garantimos a stable e os
-      # componentes que o job usa.
+      # Hosted runners already ship rustup/cargo; we ensure stable and the
+      # components the job uses.
       - name: Toolchain
         run: |
           rustup toolchain install stable --profile minimal --component rustfmt,clippy --no-self-update
@@ -53,19 +54,19 @@ jobs:
           key: cargo-${{ matrix.os }}-${{ hashFiles('cockpit/cli/Cargo.lock') }}
           restore-keys: cargo-${{ matrix.os }}-
 
-      - name: Formatação
+      - name: Formatting
         run: cargo fmt --check
 
-      - name: Clippy (warnings são erro)
+      - name: Clippy (warnings are errors)
         run: cargo clippy --all-targets -- -D warnings
 
-      - name: Testes
+      - name: Tests
         run: cargo test
 
-      # A fatia Intel do macOS é o motivo de o port existir: a release é feita
-      # em Apple Silicon e precisa rodar em Mac Intel. Aqui provamos que ela
-      # compila e que o `lipo` produz um binário que EXECUTA — `lipo
-      # -verify_arch` sozinho passa até em binário quebrado.
+      # The Intel slice of macOS is the reason the port exists: the release
+      # is built on Apple Silicon and has to run on Intel Macs. Here we prove
+      # that it compiles and that `lipo` produces a binary that EXECUTES —
+      # `lipo -verify_arch` alone passes even on a broken binary.
       - name: Universal macOS (arm64 + x86_64)
         if: runner.os == 'macOS'
         run: |
